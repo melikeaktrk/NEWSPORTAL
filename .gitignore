@@ -1,0 +1,12 @@
+**/bin/
+**/obj/
+**/node_modules/
+**/.next/
+**/.next-verify/
+/.build/
+**/coverage/
+.env
+.env.*
+!.env.example
+*.user
+*.suo
