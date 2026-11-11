@@ -3,6 +3,7 @@
 **/node_modules/
 **/.next/
 **/.next-verify/
+**/.next-*/
 /.build/
 **/coverage/
 .env

@@ -1,14 +1,23 @@
 using Microsoft.EntityFrameworkCore;
+using Microsoft.AspNetCore.Identity;
+using Microsoft.AspNetCore.Identity.EntityFrameworkCore;
 
 namespace NewsPortal.Infrastructure.Persistence;
 
-public sealed class NewsPortalDbContext(DbContextOptions<NewsPortalDbContext> options) : DbContext(options)
+public sealed class NewsPortalDbContext(DbContextOptions<NewsPortalDbContext> options) : IdentityDbContext<NewsPortalUser, IdentityRole<Guid>, Guid>(options)
 {
     public DbSet<RssFeedSourceEntity> RssFeedSources => Set<RssFeedSourceEntity>();
     public DbSet<RssNewsItemEntity> RssNewsItems => Set<RssNewsItemEntity>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
+        base.OnModelCreating(modelBuilder);
+        modelBuilder.Entity<NewsPortalUser>(entity =>
+        {
+            entity.Property(x => x.DisplayName).HasMaxLength(120).IsRequired();
+            entity.Property(x => x.IsActive).HasDefaultValue(true);
+        });
+
         modelBuilder.Entity<RssFeedSourceEntity>(entity =>
         {
             entity.ToTable("RssFeedSources");

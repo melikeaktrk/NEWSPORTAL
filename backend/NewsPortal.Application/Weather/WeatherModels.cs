@@ -16,5 +16,6 @@ public sealed record WeatherSnapshot(
 
 public interface IWeatherService
 {
+    IReadOnlyList<string> GetCities();
     Task<WeatherSnapshot> GetAsync(string city, CancellationToken cancellationToken);
 }

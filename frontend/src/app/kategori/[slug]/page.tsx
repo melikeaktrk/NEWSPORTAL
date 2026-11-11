@@ -1,28 +1,47 @@
 import type { Metadata } from "next";
+import { notFound } from "next/navigation";
 import SiteHeader from "@/components/SiteHeader";
+import { getPublishedNews } from "@/lib/news";
 
-const categories: Record<string, string> = { gundem: "Gündem", ekonomi: "Ekonomi", spor: "Spor", dunya: "Dünya" };
-const apiBase = "";
-type News = { id: string; title: string; summary: string; originalUrl: string; sourceName: string; originalPublishedAt: string | null };
+const categories: Record<string, { title: string; description: string; marker: string }> = {
+  gundem: { title: "Gündem", description: "Türkiye’nin gündemini belirleyen gelişmeler.", marker: "01" },
+  ekonomi: { title: "Ekonomi", description: "Piyasalar, iş dünyası ve ekonomide öne çıkanlar.", marker: "02" },
+  spor: { title: "Spor", description: "Sahadan, tribünden ve spor dünyasından haberler.", marker: "03" },
+  dunya: { title: "Dünya", description: "Dünyada yaşanan gelişmeler ve uluslararası gündem.", marker: "04" },
+};
 
 export const dynamic = "force-dynamic";
+
 export async function generateMetadata({ params }: { params: { slug: string } }): Promise<Metadata> {
-  const title = categories[params.slug];
-  return { title: title ? `${title} Haberleri | NewsPortal` : "Kategori Bulunamadı | NewsPortal", description: title ? `${title} kategorisindeki güncel haberler.` : undefined };
+  const category = categories[params.slug];
+  return { title: category ? `${category.title} Haberleri | NewsPortal` : "Kategori Bulunamadı | NewsPortal", description: category?.description };
 }
 
 export default async function CategoryPage({ params }: { params: { slug: string } }) {
-  const title = categories[params.slug];
-  if (!title) return <main className="page"><SiteHeader/><section className="simpleState"><p className="eyebrow">404</p><h1>Kategori bulunamadı</h1><a href="/">Ana sayfaya dön</a></section></main>;
-  let news: News[] = [];
-  let apiUnavailable = false;
-  try {
-    const response = await fetch(`${apiBase}/api/public/news?category=${params.slug}`, { cache: "no-store" });
-    if (!response.ok) apiUnavailable = true;
-    else { const result = await response.json(); news = result.data ?? []; }
-  } catch { apiUnavailable = true; }
+  const category = categories[params.slug];
+  if (!category) notFound();
+  const { items, error } = await getPublishedNews(params.slug);
 
-  return <main className="page"><SiteHeader/><section className="categoryIntro"><p className="eyebrow">NEWS / {title.toLocaleUpperCase("tr-TR")}</p><h1>{title}</h1><p>Onaylanmış haberler ve güncel gelişmeler.</p></section>
-    {news.length ? <section className="newsList" aria-label={`${title} haberleri`}>{news.map(item => <article className="newsItem" key={item.id}><p className="eyebrow">{item.sourceName}</p><h2><a href={item.originalUrl} target="_blank" rel="noreferrer">{item.title}</a></h2><p>{item.summary || "Kaynağın haber özeti."}</p><small>{item.originalPublishedAt ? new Date(item.originalPublishedAt).toLocaleString("tr-TR") : ""} · Kaynağa git</small></article>)}</section> : <div className="emptyState"><h2>{apiUnavailable ? "Haber servisine bağlanılamadı" : "Bu kategoride henüz yayınlanmış haber yok"}</h2><p>{apiUnavailable ? "Backend’i başlatıp sayfayı yenileyin." : "RSS haberleri editör onayından sonra burada yayınlanır."}</p>{apiUnavailable && <a href="http://localhost:5179/swagger" target="_blank" rel="noreferrer">API durumunu kontrol et</a>}</div>}
-    <footer>NewsPortal · Kaynak bağlantıları orijinal yayıncıya yönlendirir.</footer></main>;
+  return <main className="siteFrame">
+    <SiteHeader />
+    <div className="contentWidth">
+      <div className="breadcrumb"><a href="/">Ana Sayfa</a><span>/</span><span>{category.title}</span></div>
+      <section className="sectionMasthead">
+        <div><p className="eyebrow">KATEGORİ / {category.marker}</p><h1>{category.title}</h1><p>{category.description}</p></div>
+        <span className="sectionNumber">{category.marker}</span>
+      </section>
+      {error ? <section className="statePanel stateError"><span className="stateIcon">!</span><div><h2>Haber servisine ulaşılamadı</h2><p>{error}</p><a href="/api/health" target="_blank" rel="noreferrer">API durumunu kontrol et</a></div></section> : items.length ? <>
+        <div className="sectionBar"><h2>Yayındaki haberler</h2><span>{items.length} haber</span></div>
+        <section className="articleGrid" aria-label={`${category.title} haberleri`}>
+          {items.map((item, index) => <article className={`articleCard ${index === 0 ? "articleCardLead" : ""}`} key={item.id}>
+            <div className="articleCardTop"><span className="articleCategory">{category.title}</span><span className="articleIndex">{String(index + 1).padStart(2, "0")}</span></div>
+            <h2><a href={item.originalUrl} target="_blank" rel="noreferrer">{item.title}</a></h2>
+            <p>{item.summary || "Kaynağın haber özeti bulunmuyor."}</p>
+            <div className="articleCardFoot"><span>{item.sourceName}</span><time>{item.originalPublishedAt ? new Date(item.originalPublishedAt).toLocaleDateString("tr-TR") : "Yeni"}</time></div>
+          </article>)}
+        </section>
+      </> : <section className="statePanel"><span className="stateIcon">N</span><div><h2>Bu kategoride henüz yayınlanan haber yok</h2><p>RSS içerikleri editör onayından sonra burada görünür.</p><a href="/admin/rss">Yönetim ekranında haber kuyruğunu aç <span aria-hidden="true">↗</span></a></div></section>}
+      <footer className="siteFooter"><a className="brand" href="/">NEWS<span>PORTAL</span></a><span>Kaynak bağlantıları orijinal yayıncıya yönlendirir.</span></footer>
+    </div>
+  </main>;
 }

@@ -1,7 +1,13 @@
-import SiteHeader from "@/components/SiteHeader";
+import AdminLayout from "@/components/AdminLayout";
 
 export const metadata = { title: "Yönetim | NewsPortal" };
 
 export default function AdminPage() {
-  return <main className="page"><SiteHeader/><section className="categoryIntro adminIntro"><p className="eyebrow">NEWS PORTAL / YÖNETİM</p><h1>İçerik merkezi</h1><p>Haber akışlarını gözden geçir ve yayın kuyruğunu yönet.</p></section><div className="adminTiles"><a className="adminTile" href="/admin/rss"><span>01 / RSS</span><strong>Kaynaklar ve haber onayı</strong><p>Kaynak ekle, RSS akışını tara ve haberleri incele.</p></a><a className="adminTile" href="/"><span>02 / SİTE</span><strong>Haber portalı</strong><p>Public sayfaların görünümünü aç.</p></a></div><p className="devNotice">RSS yönetim uçları şu anda yerel geliştirme ortamında açıktır. Yayına almadan önce kullanıcı girişi ve rol yetkilendirmesi eklenmelidir.</p><footer>NewsPortal Yönetim</footer></main>;
+  return <AdminLayout title="Genel görünüm" subtitle="Haber akışını ve yayın kuyruğunu buradan yönet.">
+    <div className="adminDashboardGrid">
+      <a className="dashboardFeature" href="/admin/rss"><span className="featureIcon">◉</span><p className="eyebrow">İÇERİK AKIŞI</p><h2>RSS haber merkezi</h2><p>Kaynakları yönet, yeni haberleri tara ve yayın öncesi incele.</p><span className="featureAction">Haber merkezini aç <b>→</b></span></a>
+      <section className="dashboardWelcome"><p className="eyebrow">BAŞLANGIÇ</p><h2>Yayın masasına<br/>hoş geldin.</h2><p>Yeni içerikler RSS üzerinden inceleme kuyruğuna eklenir. Editör onayı verilen haberler kendi kategorilerinde yayınlanır.</p><div className="dashboardSteps"><span><b>01</b> Kaynağı tara</span><span><b>02</b> Haberi gözden geçir</span><span><b>03</b> Yayınla</span></div></section>
+    </div>
+    <div className="adminNotice"><span>i</span><p>SuperAdmin hesabın doğrulandı. Tüm yönetim ve yayın işlemlerine erişimin var.</p></div>
+  </AdminLayout>;
 }

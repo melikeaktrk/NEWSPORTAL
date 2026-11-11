@@ -12,9 +12,15 @@ export default function LiveWidgets() {
   const [weatherError, setWeatherError] = useState("");
   const [ratesError, setRatesError] = useState("");
   const [city, setCity] = useState("Malatya");
+  const [cities, setCities] = useState<string[]>([]);
 
   useEffect(() => {
     let active = true;
+    fetch(`${apiBase}/api/public/weather/cities`).then(async response => {
+      const body = await response.json();
+      if (!response.ok || !body.success) throw new Error(body.message || "İl listesi alınamadı.");
+      if (active) setCities(body.data);
+    }).catch(() => { if (active) setWeatherError("İl listesi alınamadı. Backend bağlantısını kontrol edin."); });
     fetch(`${apiBase}/api/public/weather?city=${encodeURIComponent(city)}`).then(async response => {
       const body = await response.json();
       if (!response.ok || !body.success) throw new Error(body.message || "Hava durumu alınamadı.");
@@ -30,7 +36,7 @@ export default function LiveWidgets() {
 
   return <section className="widgets" aria-label="Hava durumu ve döviz">
     <article className="widget" id="hava-durumu">
-      <div className="widgetTop"><div><p className="eyebrow">ŞEHRİNDE BUGÜN</p><h2>Hava durumu</h2></div><select aria-label="Şehir seç" value={city} onChange={event => setCity(event.target.value)}>{["Malatya", "İstanbul", "Ankara", "İzmir", "Antalya", "Bursa", "Adana"].map(value => <option key={value}>{value}</option>)}</select></div>
+      <div className="widgetTop"><div><p className="eyebrow">ŞEHRİNDE BUGÜN</p><h2>Hava durumu</h2></div><select aria-label="İl seç" value={city} disabled={!cities.length} onChange={event => setCity(event.target.value)}>{cities.length ? cities.map(value => <option key={value}>{value}</option>) : <option>İller yükleniyor…</option>}</select></div>
       {weather ? <><div className="weatherReading"><strong>{Math.round(weather.temperature)}°</strong><span>{weather.description}<br/>Hissedilen {weather.apparentTemperature == null ? "—" : `${Math.round(weather.apparentTemperature)}°`}</span></div><p className="widgetMeta">En düşük {weather.dailyMinTemperature ?? "—"}° · En yüksek {weather.dailyMaxTemperature ?? "—"}° · Nem {weather.relativeHumidity ?? "—"}% · Rüzgâr {weather.windSpeed ?? "—"} km/sa</p><p className="sourceNote">{weather.source} · Güncelleme {new Date(weather.fetchedAt).toLocaleTimeString("tr-TR", { hour: "2-digit", minute: "2-digit" })}</p></> : <p className="widgetMeta">{weatherError || "Veri yükleniyor…"}</p>}
     </article>
     <article className="widget">

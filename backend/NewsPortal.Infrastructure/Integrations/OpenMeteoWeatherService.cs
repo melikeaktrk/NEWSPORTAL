@@ -1,5 +1,6 @@
-using System.Net.Http.Json;
 using System.Globalization;
+using System.Net.Http.Json;
+using System.Text;
 using System.Text.Json.Serialization;
 using Microsoft.Extensions.Caching.Memory;
 using NewsPortal.Application.Weather;
@@ -8,18 +9,19 @@ namespace NewsPortal.Infrastructure.Integrations;
 
 public sealed class OpenMeteoWeatherService(HttpClient http, IMemoryCache cache) : IWeatherService
 {
-    private static readonly IReadOnlyDictionary<string, (double Lat, double Lon)> Cities = new Dictionary<string, (double, double)>(StringComparer.OrdinalIgnoreCase)
-    {
-        ["İstanbul"] = (41.0082, 28.9784), ["Ankara"] = (39.9334, 32.8597), ["İzmir"] = (38.4237, 27.1428),
-        ["Malatya"] = (38.3552, 38.3095), ["Antalya"] = (36.8969, 30.7133), ["Bursa"] = (40.1885, 29.0610), ["Adana"] = (37.0000, 35.3213)
-    };
+    private static readonly string[] TurkishProvinces =
+    [
+        "Adana", "Adıyaman", "Afyonkarahisar", "Ağrı", "Aksaray", "Amasya", "Ankara", "Antalya", "Ardahan", "Artvin", "Aydın", "Balıkesir", "Bartın", "Batman", "Bayburt", "Bilecik", "Bingöl", "Bitlis", "Bolu", "Burdur", "Bursa", "Çanakkale", "Çankırı", "Çorum", "Denizli", "Diyarbakır", "Düzce", "Edirne", "Elazığ", "Erzincan", "Erzurum", "Eskişehir", "Gaziantep", "Giresun", "Gümüşhane", "Hakkari", "Hatay", "Iğdır", "Isparta", "İstanbul", "İzmir", "Kahramanmaraş", "Karabük", "Karaman", "Kars", "Kastamonu", "Kayseri", "Kırıkkale", "Kırklareli", "Kırşehir", "Kilis", "Kocaeli", "Konya", "Kütahya", "Malatya", "Manisa", "Mardin", "Mersin", "Muğla", "Muş", "Nevşehir", "Niğde", "Ordu", "Osmaniye", "Rize", "Sakarya", "Samsun", "Siirt", "Sinop", "Sivas", "Şanlıurfa", "Şırnak", "Tekirdağ", "Tokat", "Trabzon", "Tunceli", "Uşak", "Van", "Yalova", "Yozgat", "Zonguldak"
+    ];
+
+    public IReadOnlyList<string> GetCities() => TurkishProvinces;
 
     public async Task<WeatherSnapshot> GetAsync(string city, CancellationToken cancellationToken)
     {
-        if (!Cities.TryGetValue(city.Trim(), out var coordinates))
-            throw new ArgumentException("Desteklenmeyen şehir. İstanbul, Ankara, İzmir, Malatya, Antalya, Bursa veya Adana seçin.", nameof(city));
-
-        var key = $"weather:{city}";
+        var canonicalCity = TurkishProvinces.FirstOrDefault(x => x.Equals(city.Trim(), StringComparison.OrdinalIgnoreCase));
+        if (canonicalCity is null) throw new ArgumentException("Türkiye'nin 81 ilinden birini seçin.", nameof(city));
+        var coordinates = await GetCoordinatesAsync(canonicalCity, cancellationToken);
+        var key = $"weather:{canonicalCity}";
         if (cache.TryGetValue(key, out WeatherSnapshot? cached) && cached is not null) return cached;
 
         var latitude = coordinates.Lat.ToString(CultureInfo.InvariantCulture);
@@ -29,12 +31,36 @@ public sealed class OpenMeteoWeatherService(HttpClient http, IMemoryCache cache)
             ?? throw new HttpRequestException("Hava durumu sağlayıcısından boş yanıt alındı.");
         if (response.Current is null) throw new HttpRequestException("Hava durumu yanıtında güncel veri bulunamadı.");
 
-        var data = new WeatherSnapshot(city, response.Current.Temperature, response.Current.ApparentTemperature,
+        var data = new WeatherSnapshot(canonicalCity, response.Current.Temperature, response.Current.ApparentTemperature,
             response.Current.RelativeHumidity, response.Current.WindSpeed, response.Current.WeatherCode, Describe(response.Current.WeatherCode),
             response.Daily?.Min?.FirstOrDefault(), response.Daily?.Max?.FirstOrDefault(), response.Daily?.Time?.FirstOrDefault() ?? DateTime.UtcNow.ToString("yyyy-MM-dd"),
             DateTimeOffset.UtcNow, "Open-Meteo");
         cache.Set(key, data, TimeSpan.FromMinutes(20));
         return data;
+    }
+
+    private async Task<(double Lat, double Lon)> GetCoordinatesAsync(string city, CancellationToken cancellationToken)
+    {
+        var key = $"weather-coordinates:{city}";
+        if (cache.TryGetValue(key, out (double Lat, double Lon) cached)) return cached;
+        var url = $"https://geocoding-api.open-meteo.com/v1/search?name={Uri.EscapeDataString(city)}&count=10&language=tr&format=json&countryCode=TR";
+        var response = await http.GetFromJsonAsync<GeocodingResponse>(url, cancellationToken);
+        var place = response?.Results?.FirstOrDefault(x => x.CountryCode == "TR" && (Normalize(x.Name) == Normalize(city) || Normalize(x.Admin1 ?? "") == Normalize(city)))
+            ?? response?.Results?.FirstOrDefault(x => x.CountryCode == "TR");
+        if (place is null) throw new HttpRequestException($"{city} için konum bulunamadı.");
+        var result = (place.Latitude, place.Longitude);
+        cache.Set(key, result, TimeSpan.FromDays(30));
+        return result;
+    }
+
+    private static string Normalize(string value)
+    {
+        var decomposed = value.Normalize(NormalizationForm.FormD);
+        var builder = new StringBuilder(decomposed.Length);
+        foreach (var character in decomposed)
+            if (CharUnicodeInfo.GetUnicodeCategory(character) != UnicodeCategory.NonSpacingMark)
+                builder.Append(char.ToLowerInvariant(character));
+        return builder.ToString();
     }
 
     private static string Describe(int code) => code switch
@@ -50,21 +76,25 @@ public sealed class OpenMeteoWeatherService(HttpClient http, IMemoryCache cache)
     private sealed class CurrentData
     {
         [JsonPropertyName("time")] public string? Time { get; set; }
-        [JsonPropertyName("temperature_2m")]
-        public double Temperature { get; set; }
-        [JsonPropertyName("apparent_temperature")]
-        public double? ApparentTemperature { get; set; }
-        [JsonPropertyName("relative_humidity_2m")]
-        public int? RelativeHumidity { get; set; }
-        [JsonPropertyName("wind_speed_10m")]
-        public double? WindSpeed { get; set; }
-        [JsonPropertyName("weather_code")]
-        public int WeatherCode { get; set; }
+        [JsonPropertyName("temperature_2m")] public double Temperature { get; set; }
+        [JsonPropertyName("apparent_temperature")] public double? ApparentTemperature { get; set; }
+        [JsonPropertyName("relative_humidity_2m")] public int? RelativeHumidity { get; set; }
+        [JsonPropertyName("wind_speed_10m")] public double? WindSpeed { get; set; }
+        [JsonPropertyName("weather_code")] public int WeatherCode { get; set; }
     }
     private sealed class DailyData
     {
         [JsonPropertyName("time")] public List<string>? Time { get; set; }
         [JsonPropertyName("temperature_2m_min")] public List<double>? Min { get; set; }
         [JsonPropertyName("temperature_2m_max")] public List<double>? Max { get; set; }
+    }
+    private sealed class GeocodingResponse { [JsonPropertyName("results")] public List<GeocodedPlace>? Results { get; set; } }
+    private sealed class GeocodedPlace
+    {
+        [JsonPropertyName("name")] public string Name { get; set; } = "";
+        [JsonPropertyName("admin1")] public string? Admin1 { get; set; }
+        [JsonPropertyName("country_code")] public string CountryCode { get; set; } = "";
+        [JsonPropertyName("latitude")] public double Latitude { get; set; }
+        [JsonPropertyName("longitude")] public double Longitude { get; set; }
     }
 }

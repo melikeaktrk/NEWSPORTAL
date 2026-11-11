@@ -8,6 +8,9 @@ namespace NewsPortal.API.Controllers;
 [Route("api/public")]
 public sealed class PublicDataController(IWeatherService weather, IExchangeRateService rates) : ControllerBase
 {
+    [HttpGet("weather/cities")]
+    public IActionResult GetCities() => Ok(new { success = true, data = weather.GetCities() });
+
     [HttpGet("weather")]
     public async Task<IActionResult> GetWeather([FromQuery] string city = "Malatya", CancellationToken cancellationToken = default)
     {

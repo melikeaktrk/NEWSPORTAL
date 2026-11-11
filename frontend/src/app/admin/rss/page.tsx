@@ -1,8 +1,11 @@
-import SiteHeader from "@/components/SiteHeader";
+import AdminLayout from "@/components/AdminLayout";
 import RssReviewPanel from "@/components/RssReviewPanel";
 
-export const metadata = { title: "RSS Kaynakları | NewsPortal" };
+export const metadata = { title: "RSS Haber Akışı | NewsPortal" };
 
 export default function AdminRssPage() {
-  return <main className="page"><SiteHeader/><section className="categoryIntro adminIntro"><p className="eyebrow">YÖNETİM / RSS</p><h1>Haber akışı</h1><p>RSS içerikleri varsayılan olarak onay bekler; yalnızca yayınlanan haberler kategori sayfalarında görünür.</p></section><RssReviewPanel/><footer>Kaynak izinlerini ve yayın koşullarını kontrol edin. Haberler varsayılan olarak yalnızca başlık, kısa özet ve kaynak bağlantısıyla listelenir.</footer></main>;
+  return <AdminLayout title="RSS haber akışı" subtitle="Haberleri kaynaklarıyla incele, yayın kuyruğunu düzenle.">
+    <div className="workflowBanner"><span className="workflowIcon">✓</span><div><strong>Önce incele, sonra yayınla</strong><p>RSS kayıtları onay bekler. Yayına alınan haberler ilgili kategori sayfasında görünür.</p></div><a href="/kategori/gundem">Kategorileri gör ↗</a></div>
+    <RssReviewPanel />
+  </AdminLayout>;
 }
