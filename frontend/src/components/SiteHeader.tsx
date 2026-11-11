@@ -16,7 +16,7 @@ export default function SiteHeader() {
         <div className="headerStatement">Gündemi takip et.<br/><span>Bilgiye doğrudan ulaş.</span></div>
         <a className="weatherQuickLink" href="/#hava-durumu"><span className="weatherSun">☀</span><span>Hava durumu<small>Şehrindeki son durum</small></span><b>↘</b></a>
       </div>
-      <nav className="siteNav" aria-label="Ana menü"><a className={pathname === "/" ? "navActive" : ""} href="/" aria-current={pathname === "/" ? "page" : undefined}>Ana Sayfa</a>{categories.map(([name, slug]) => { const active = pathname === `/kategori/${slug}`; return <a className={active ? "navActive" : ""} aria-current={active ? "page" : undefined} key={slug} href={`/kategori/${slug}`}>{name}</a>; })}<a href="/#son-haberler">Son haberler</a></nav>
+      <nav className="siteNav" aria-label="Ana menü"><a className={pathname === "/" ? "navActive" : ""} href="/" aria-current={pathname === "/" ? "page" : undefined}>Ana Sayfa</a>{categories.map(([name, slug]) => { const active = pathname === `/kategori/${slug}`; return <a className={active ? "navActive" : ""} aria-current={active ? "page" : undefined} key={slug} href={`/kategori/${slug}`}>{name}</a>; })}<a className={pathname === "/son-haberler" ? "navActive" : ""} href="/son-haberler" aria-current={pathname === "/son-haberler" ? "page" : undefined}>Son haberler</a></nav>
     </header>
   </>;
 }
