@@ -22,6 +22,7 @@ public sealed class RssNewsItemEntity
     public string Title { get; set; } = "";
     public string Summary { get; set; } = "";
     public string OriginalUrl { get; set; } = "";
+    public string? ImageUrl { get; set; }
     public string Category { get; set; } = "";
     public DateTimeOffset? OriginalPublishedAt { get; set; }
     public DateTimeOffset ImportedAt { get; set; }

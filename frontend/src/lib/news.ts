@@ -3,6 +3,7 @@ export type PublishedNews = {
   title: string;
   summary: string;
   originalUrl: string;
+  imageUrl: string | null;
   sourceName: string;
   category: string;
   originalPublishedAt: string | null;

@@ -9,7 +9,7 @@ const categories = [
 export default function SiteHeader() {
   const pathname = usePathname() ?? "/";
   return <>
-    <div className="publicationBar"><div className="publicationInner"><span><i className="liveDot"/> Güvenilir kaynaklardan, editör onaylı</span><a href="/admin">İçerik yönetimi <span aria-hidden="true">↗</span></a></div></div>
+    <div className="publicationBar"><div className="publicationInner"><span><i className="liveDot"/> Güvenilir kaynaklardan, editör onaylı</span></div></div>
     <header className="siteHeader">
       <div className="headerMain">
         <a className="brand" href="/" aria-label="NewsPortal ana sayfa"><span className="brandIcon">N</span><span className="brandWords">NEWS<strong>PORTAL</strong><small>HABERİN MERKEZİ</small></span></a>

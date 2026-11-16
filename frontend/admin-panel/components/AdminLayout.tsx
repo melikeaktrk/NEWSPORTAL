@@ -1,5 +1,5 @@
 import type { ReactNode } from "react";
-import AdminLogout from "@/components/AdminLogout";
+import AdminLogout from "./AdminLogout";
 
 export default function AdminLayout({ title, subtitle, children }: { title: string; subtitle: string; children: ReactNode }) {
   return <div className="adminLayout">

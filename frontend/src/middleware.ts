@@ -1,13 +1,5 @@
-import { NextRequest, NextResponse } from "next/server";
+import { protectAdminRoute } from "../admin-panel/auth";
 
-export function middleware(request: NextRequest) {
-  if (request.nextUrl.pathname === "/admin/login") return NextResponse.next();
-  if (!request.cookies.has(".NewsPortal.Admin")) {
-    const loginUrl = new URL("/admin/login", request.url);
-    loginUrl.searchParams.set("returnUrl", request.nextUrl.pathname);
-    return NextResponse.redirect(loginUrl);
-  }
-  return NextResponse.next();
-}
+export const middleware = protectAdminRoute;
 
 export const config = { matcher: ["/admin/:path*"] };

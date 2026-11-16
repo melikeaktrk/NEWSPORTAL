@@ -38,6 +38,7 @@ public sealed class NewsPortalDbContext(DbContextOptions<NewsPortalDbContext> op
             entity.Property(x => x.Title).HasMaxLength(1000).IsRequired();
             entity.Property(x => x.Summary).HasMaxLength(1000).IsRequired();
             entity.Property(x => x.OriginalUrl).HasMaxLength(2048).IsRequired();
+            entity.Property(x => x.ImageUrl).HasMaxLength(2048);
             entity.Property(x => x.Category).HasMaxLength(50).IsRequired();
             entity.Property(x => x.Status).HasMaxLength(30).IsRequired();
             entity.HasIndex(x => new { x.FeedId, x.ExternalId }).IsUnique();

@@ -5,17 +5,15 @@ import type { PublishedNews } from "@/lib/news";
 
 export default function HomeSlider({ items, labels }: { items: PublishedNews[]; labels: Record<string, string> }) {
   const [active, setActive] = useState(0);
+  const [failedImages, setFailedImages] = useState<Record<string, boolean>>({});
   const item = items[active];
   if (!item) return null;
   const move = (step: number) => setActive(index => (index + step + items.length) % items.length);
   return <section className="homeSlider" aria-label="Öne çıkan haberler" aria-roledescription="carousel">
-    <div className="sliderCover" aria-hidden="true">
-      <div className="sliderCoverLines" />
-      <span className="sliderCoverKicker">NEWS PORTAL · {labels[item.category] ?? item.category}</span>
-      <span className="sliderCoverWord">{String(active + 1).padStart(2, "0")}</span>
-      <span className="sliderCoverCaption">GÜNDEMİN NABZI</span>
-    </div>
-    <div className="sliderStory" aria-live="polite" aria-atomic="true">
+    <div className="sliderCover">
+      {item.imageUrl && !failedImages[item.id] && <img className="sliderCoverImage" src={item.imageUrl} alt="" loading={active === 0 ? "eager" : "lazy"} decoding="async" onError={() => setFailedImages(current => ({ ...current, [item.id]: true }))} />}
+      <div className="sliderCoverShade" />
+      <div className="sliderStory" aria-live="polite" aria-atomic="true">
       <div className="sliderMeta"><span><i className="liveDot" /> ÖNE ÇIKAN HABER</span><span>{item.sourceName}</span></div>
       <a className="articleCategory" href={`/kategori/${item.category}`}>{labels[item.category] ?? item.category}</a>
       <h1><a href={item.originalUrl} target="_blank" rel="noreferrer">{item.title}</a></h1>
@@ -25,6 +23,7 @@ export default function HomeSlider({ items, labels }: { items: PublishedNews[]; 
         <span className="sliderCount">{String(active + 1).padStart(2, "0")} <i>/</i> {String(items.length).padStart(2, "0")}</span>
         <button className="sliderArrow" type="button" onClick={() => move(-1)} aria-label="Önceki haber">←</button>
         <button className="sliderArrow sliderArrowNext" type="button" onClick={() => move(1)} aria-label="Sonraki haber">→</button>
+      </div>
       </div>
     </div>
   </section>;

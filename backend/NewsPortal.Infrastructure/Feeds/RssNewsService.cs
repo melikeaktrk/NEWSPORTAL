@@ -1,5 +1,7 @@
 using System.Collections.Concurrent;
 using System.Net;
+using System.Net.Sockets;
+using System.Text;
 using System.Text.RegularExpressions;
 using System.Xml;
 using System.Xml.Linq;
@@ -12,7 +14,7 @@ using NewsPortal.Infrastructure.Persistence;
 namespace NewsPortal.Infrastructure.Feeds;
 
 public sealed record RssFeedSource(Guid Id, string Name, string FeedUrl, string Category, bool IsActive, DateTimeOffset? LastFetchedAt = null, string? LastError = null);
-public sealed record RssNewsItem(Guid Id, Guid FeedId, string SourceName, string Title, string Summary, string OriginalUrl, string Category, DateTimeOffset? OriginalPublishedAt, DateTimeOffset ImportedAt, string Status);
+public sealed record RssNewsItem(Guid Id, Guid FeedId, string SourceName, string Title, string Summary, string OriginalUrl, string? ImageUrl, string Category, DateTimeOffset? OriginalPublishedAt, DateTimeOffset ImportedAt, string Status);
 
 public sealed class RssNewsService(IHttpClientFactory clients, ILogger<RssNewsService> logger, IConfiguration configuration, IDbContextFactory<NewsPortalDbContext> dbFactory) : BackgroundService
 {
@@ -33,7 +35,7 @@ public sealed class RssNewsService(IHttpClientFactory clients, ILogger<RssNewsSe
         if (status is not null) query = query.Where(x => x.Status == status);
         if (category is not null) query = query.Where(x => x.Category == category);
         return await query.OrderByDescending(x => x.OriginalPublishedAt ?? x.ImportedAt).Take(100)
-            .Select(x => new RssNewsItem(x.Id, x.FeedId, x.SourceName, x.Title, x.Summary, x.OriginalUrl, x.Category, x.OriginalPublishedAt, x.ImportedAt, x.Status))
+            .Select(x => new RssNewsItem(x.Id, x.FeedId, x.SourceName, x.Title, x.Summary, x.OriginalUrl, x.ImageUrl, x.Category, x.OriginalPublishedAt, x.ImportedAt, x.Status))
             .ToArrayAsync(cancellationToken);
     }
 
@@ -106,6 +108,9 @@ public sealed class RssNewsService(IHttpClientFactory clients, ILogger<RssNewsSe
         using var reader = XmlReader.Create(stream, settings);
         var doc = await XDocument.LoadAsync(reader, LoadOptions.None, cancellationToken);
         var added = 0;
+        var newItemImageLookups = 0;
+        var publishedImageLookups = 0;
+        var attemptedPublishedImageIds = new HashSet<Guid>();
         foreach (var entry in doc.Descendants().Where(x => x.Name.LocalName is "item" or "entry").Take(100))
         {
             var title = PlainText(Child(entry, "title"));
@@ -113,23 +118,70 @@ public sealed class RssNewsService(IHttpClientFactory clients, ILogger<RssNewsSe
             var link = (string?)linkElement?.Attribute("href") ?? linkElement?.Value ?? Child(entry, "guid") ?? Child(entry, "id");
             if (string.IsNullOrWhiteSpace(title) || !Uri.TryCreate(link?.Trim(), UriKind.Absolute, out var articleUri) || articleUri.Scheme is not ("http" or "https")) continue;
             var summary = PlainText(Child(entry, "description") ?? Child(entry, "summary") ?? Child(entry, "content"));
+            var imageUrl = ExtractImageUrl(entry, uri);
             var externalId = Child(entry, "guid") ?? Child(entry, "id") ?? articleUri.AbsoluteUri;
             var normalizedExternalId = externalId.Trim();
             var dateText = Child(entry, "pubDate") ?? Child(entry, "published") ?? Child(entry, "updated");
             DateTimeOffset? published = DateTimeOffset.TryParse(dateText, out var parsed) ? parsed : null;
             await using var db = await dbFactory.CreateDbContextAsync(cancellationToken);
-            if (await db.RssNewsItems.AnyAsync(x => x.FeedId == feed.Id && x.ExternalId == normalizedExternalId, cancellationToken)) continue;
+            var existing = await db.RssNewsItems.FirstOrDefaultAsync(x => x.FeedId == feed.Id && x.ExternalId == normalizedExternalId, cancellationToken);
+            if (!string.IsNullOrWhiteSpace(existing?.ImageUrl)) continue;
+            var shouldFetchArticleImage = existing?.Status == "Published"
+                ? publishedImageLookups < 20
+                : existing is null && newItemImageLookups < 3;
+            if (imageUrl is null && shouldFetchArticleImage)
+            {
+                if (existing?.Status == "Published")
+                {
+                    publishedImageLookups++;
+                    attemptedPublishedImageIds.Add(existing.Id);
+                }
+                else newItemImageLookups++;
+                imageUrl = await FetchArticleImageUrlAsync(articleUri, cancellationToken);
+            }
+            if (existing is not null)
+            {
+                if (string.IsNullOrWhiteSpace(existing.ImageUrl) && imageUrl is not null)
+                {
+                    existing.ImageUrl = imageUrl;
+                    await db.SaveChangesAsync(cancellationToken);
+                }
+                continue;
+            }
             db.RssNewsItems.Add(new RssNewsItemEntity
             {
                 Id = Guid.NewGuid(), FeedId = feed.Id, ExternalId = normalizedExternalId, SourceName = feed.Name,
-                Title = title, Summary = summary, OriginalUrl = articleUri.AbsoluteUri, Category = feed.Category,
+                Title = title, Summary = summary, OriginalUrl = articleUri.AbsoluteUri, ImageUrl = imageUrl, Category = feed.Category,
                 OriginalPublishedAt = published, ImportedAt = DateTimeOffset.UtcNow, Status = "PendingReview"
             });
             await db.SaveChangesAsync(cancellationToken);
             added++;
         }
+        await BackfillPublishedImagesAsync(feed.Id, attemptedPublishedImageIds, cancellationToken);
         await UpdateFeedStatusAsync(feed.Id, DateTimeOffset.UtcNow, null, cancellationToken);
         return added;
+    }
+
+    private async Task BackfillPublishedImagesAsync(Guid feedId, HashSet<Guid> attemptedIds, CancellationToken cancellationToken)
+    {
+        await using var db = await dbFactory.CreateDbContextAsync(cancellationToken);
+        var missingImages = await db.RssNewsItems.AsNoTracking()
+            .Where(x => x.FeedId == feedId && x.Status == "Published" && x.ImageUrl == null && !attemptedIds.Contains(x.Id))
+            .OrderByDescending(x => x.OriginalPublishedAt ?? x.ImportedAt)
+            .Take(20)
+            .Select(x => new { x.Id, x.OriginalUrl })
+            .ToArrayAsync(cancellationToken);
+
+        foreach (var item in missingImages)
+        {
+            if (!Uri.TryCreate(item.OriginalUrl, UriKind.Absolute, out var articleUri)) continue;
+            var imageUrl = await FetchArticleImageUrlAsync(articleUri, cancellationToken);
+            if (imageUrl is null) continue;
+            var existing = await db.RssNewsItems.FirstOrDefaultAsync(x => x.Id == item.Id, cancellationToken);
+            if (existing is null || !string.IsNullOrWhiteSpace(existing.ImageUrl)) continue;
+            existing.ImageUrl = imageUrl;
+            await db.SaveChangesAsync(cancellationToken);
+        }
     }
 
     private static async Task<Uri> ValidateUrlAsync(string value, CancellationToken cancellationToken)
@@ -154,6 +206,101 @@ public sealed class RssNewsService(IHttpClientFactory clients, ILogger<RssNewsSe
     }
 
     private static string? Child(XElement element, string name) => element.Elements().FirstOrDefault(x => x.Name.LocalName == name)?.Value;
+    private static string? ExtractImageUrl(XElement entry, Uri feedUri)
+    {
+        var candidate = entry.DescendantsAndSelf()
+            .Where(x => x.Name.LocalName is "enclosure" or "content" or "thumbnail")
+            .Select(x =>
+            {
+                var type = (string?)x.Attribute("type");
+                if (x.Name.LocalName == "enclosure" && type is not null && !type.StartsWith("image/", StringComparison.OrdinalIgnoreCase)) return null;
+                return (string?)x.Attribute("url") ?? (string?)x.Attribute("href");
+            })
+            .FirstOrDefault(x => !string.IsNullOrWhiteSpace(x));
+
+        if (string.IsNullOrWhiteSpace(candidate))
+        {
+            var html = entry.Elements().FirstOrDefault(x => x.Name.LocalName is "description" or "summary" or "encoded")?.Value;
+            if (!string.IsNullOrWhiteSpace(html))
+            {
+                var match = Regex.Match(html, "<img\\b[^>]*?\\b(?:src|data-src)\\s*=\\s*['\\\"]([^'\\\"]+)['\\\"]", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
+                if (match.Success) candidate = WebUtility.HtmlDecode(match.Groups[1].Value);
+            }
+        }
+
+        if (!Uri.TryCreate(feedUri, candidate, out var imageUri) || imageUri.Scheme is not ("http" or "https") || !string.IsNullOrEmpty(imageUri.UserInfo)) return null;
+        return imageUri.AbsoluteUri.Length <= 2048 ? imageUri.AbsoluteUri : null;
+    }
+
+    private async Task<string?> FetchArticleImageUrlAsync(Uri articleUri, CancellationToken cancellationToken)
+    {
+        using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        timeout.CancelAfter(TimeSpan.FromSeconds(4));
+        var currentUri = articleUri;
+        try
+        {
+            for (var redirect = 0; redirect <= 2; redirect++)
+            {
+                currentUri = await ValidateUrlAsync(currentUri.AbsoluteUri, timeout.Token);
+                using var request = new HttpRequestMessage(HttpMethod.Get, currentUri);
+                request.Headers.UserAgent.ParseAdd("NewsPortal/1.0 image metadata reader");
+                request.Headers.Accept.ParseAdd("text/html");
+                using var response = await clients.CreateClient("rss").SendAsync(request, HttpCompletionOption.ResponseHeadersRead, timeout.Token);
+                if ((int)response.StatusCode is >= 300 and < 400 && response.Headers.Location is not null && redirect < 2)
+                {
+                    currentUri = new Uri(currentUri, response.Headers.Location);
+                    continue;
+                }
+                if (!response.IsSuccessStatusCode || response.Content.Headers.ContentType?.MediaType is not "text/html") return null;
+                if (response.Content.Headers.ContentLength is > 1_000_000) return null;
+
+                await using var stream = await response.Content.ReadAsStreamAsync(timeout.Token);
+                using var htmlReader = new StreamReader(stream, Encoding.UTF8, detectEncodingFromByteOrderMarks: true);
+                var html = await ReadHtmlHeadAsync(htmlReader, timeout.Token);
+                foreach (Match tagMatch in Regex.Matches(html, "<meta\\b[^>]*>", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant))
+                {
+                    var tag = tagMatch.Value;
+                    var property = HtmlAttribute(tag, "property") ?? HtmlAttribute(tag, "name");
+                    if (property is not ("og:image" or "og:image:url" or "twitter:image")) continue;
+                    var value = HtmlAttribute(tag, "content");
+                    if (string.IsNullOrWhiteSpace(value) || !Uri.TryCreate(currentUri, value, out var imageUri) || imageUri.Scheme is not ("http" or "https")) continue;
+                    try { return (await ValidateUrlAsync(imageUri.AbsoluteUri, timeout.Token)).AbsoluteUri; }
+                    catch (Exception ex) when (ex is ArgumentException or SocketException or HttpRequestException) { logger.LogDebug("Haber görsel adresi atlandı: {ImageUrl}", imageUri); }
+                }
+                return null;
+            }
+        }
+        catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested) { return null; }
+        catch (Exception ex) when (ex is HttpRequestException or IOException or SocketException or ArgumentException or InvalidDataException)
+        {
+            logger.LogDebug(ex, "Haber sayfasından görsel alınamadı: {ArticleUrl}", articleUri);
+        }
+        return null;
+    }
+
+    private static async Task<string> ReadHtmlHeadAsync(StreamReader reader, CancellationToken cancellationToken)
+    {
+        const int maxCharacters = 1_000_000;
+        var buffer = new char[8192];
+        var result = new StringBuilder();
+        while (result.Length < maxCharacters)
+        {
+            var count = await reader.ReadAsync(buffer.AsMemory(0, Math.Min(buffer.Length, maxCharacters - result.Length)), cancellationToken);
+            if (count == 0) break;
+            result.Append(buffer, 0, count);
+            if (result.ToString().Contains("</head", StringComparison.OrdinalIgnoreCase)) break;
+        }
+        return result.ToString();
+    }
+
+    private static string? HtmlAttribute(string tag, string name)
+    {
+        var doubleQuoted = Regex.Match(tag, $@"\b{Regex.Escape(name)}\s*=\s*""([^""]*)""", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
+        if (doubleQuoted.Success) return WebUtility.HtmlDecode(doubleQuoted.Groups[1].Value);
+        var singleQuoted = Regex.Match(tag, $@"\b{Regex.Escape(name)}\s*=\s*'([^']*)'", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
+        return singleQuoted.Success ? WebUtility.HtmlDecode(singleQuoted.Groups[1].Value) : null;
+    }
+
     private static string PlainText(string? value)
     {
         if (string.IsNullOrWhiteSpace(value)) return "";
